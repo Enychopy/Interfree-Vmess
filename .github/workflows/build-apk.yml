@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   build:
+    name: Build Android APK and libXray
     runs-on: ubuntu-latest
 
     steps:
@@ -23,8 +24,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          accept-android-sdk-licenses: true
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -47,9 +54,12 @@ jobs:
         working-directory: _build/libXray
         run: |
           python3 build/main.py android
-          test -s libXray.aar
+          find . -name "libXray.aar" -type f
+          AAR_PATH=$(find . -name "libXray.aar" -type f | head -n 1)
+          test -n "$AAR_PATH"
           mkdir -p "$GITHUB_WORKSPACE/app/libs"
-          cp libXray.aar "$GITHUB_WORKSPACE/app/libs/libXray.aar"
+          cp "$AAR_PATH" "$GITHUB_WORKSPACE/app/libs/libXray.aar"
+          test -s "$GITHUB_WORKSPACE/app/libs/libXray.aar"
 
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
@@ -60,6 +70,7 @@ jobs:
           name: INTERFREE-VMESS-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 7
 
       - name: Upload libXray AAR
         uses: actions/upload-artifact@v4
@@ -67,3 +78,4 @@ jobs:
           name: libXray-android-aar
           path: app/libs/libXray.aar
           if-no-files-found: error
+          retention-days: 7
