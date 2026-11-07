@@ -1,48 +1,69 @@
 
-name: Build INTERFREE VMESS APK
+name: Build INTERFREE VMESS APK + libXray
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: ["main"]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout INTERFREE VMESS
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+          java-version: "17"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
-          accept-android-sdk-licenses: true
 
-      - name: Build APK
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Checkout official XTLS libXray
+        uses: actions/checkout@v4
+        with:
+          repository: XTLS/libXray
+          ref: main
+          path: _build/libXray
+
+      - name: Build official Android AAR
+        working-directory: _build/libXray
+        run: |
+          python3 build/main.py android
+          test -s libXray.aar
+          mkdir -p "$GITHUB_WORKSPACE/app/libs"
+          cp libXray.aar "$GITHUB_WORKSPACE/app/libs/libXray.aar"
+
+      - name: Build debug APK
         run: gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: INTERFREE-VMESS-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 7
+
+      - name: Upload libXray AAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: libXray-android-aar
+          path: app/libs/libXray.aar
+          if-no-files-found: error
