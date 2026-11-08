@@ -1,15 +1,21 @@
-
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Permisos esenciales para red y VPN -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Permisos obligatorios para Foreground Service en Android 14+ -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
 
+    <!-- La clave está en tools:replace para evitar que libXray.aar rompa la compilación -->
     <application
         android:allowBackup="false"
-        android:label="INTERFREE VPN VMESS"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:label="INTERFREE VPN"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        tools:replace="android:allowBackup,android:label,android:theme">
 
         <activity
             android:name=".MainActivity"
