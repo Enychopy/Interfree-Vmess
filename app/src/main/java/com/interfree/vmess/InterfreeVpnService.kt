@@ -111,7 +111,8 @@ class InterfreeVpnService : VpnService() {
                 .setMtu(1500)
                 .addAddress("172.19.0.2", 24)
                 .addRoute("0.0.0.0", 0)
-                .addDnsServer("1.1.1.1")
+                // Usamos un DNS virtual interno de Xray (fakedns) para capturar las peticiones
+                .addDnsServer("1.1.1.1") 
                 .addDnsServer("8.8.8.8")
                 .establish()
                 ?: throw IllegalStateException("Android no permitió crear la interfaz VPN")
@@ -152,7 +153,6 @@ class InterfreeVpnService : VpnService() {
             
             for (i in 1..6) {
                 try {
-                    // LA SOLUCIÓN: Cambiamos de http a https
                     val url = URL("https://connectivitycheck.gstatic.com/generate_204")
                     val connection = url.openConnection() as HttpURLConnection
                     connection.connectTimeout = 3000
@@ -214,6 +214,7 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
+        // Habilitamos la intercepción DNS en la interfaz TUN
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
@@ -227,7 +228,8 @@ class InterfreeVpnService : VpnService() {
             )
             .put("sniffing", JSONObject()
                 .put("enabled", true)
-                .put("destOverride", JSONArray().put("http").put("tls"))
+                .put("destOverride", JSONArray().put("http").put("tls").put("fakedns"))
+                .put("routeOnly", true)
             )
 
         val outboundProxy = JSONObject()
@@ -240,21 +242,36 @@ class InterfreeVpnService : VpnService() {
             .put("tag", "direct")
             .put("protocol", "freedom")
 
+        // Configuramos Xray para resolver DNS y creamos una regla para enrutar el tráfico DNS al proxy
         val routing = JSONObject()
             .put("domainStrategy", "AsIs")
-            .put("rules", JSONArray().put(
-                JSONObject()
+            .put("rules", JSONArray()
+                .put(JSONObject()
+                    .put("type", "field")
+                    .put("port", "53")
+                    .put("network", "udp,tcp")
+                    .put("outboundTag", "proxy")
+                )
+                .put(JSONObject()
                     .put("type", "field")
                     .put("outboundTag", "proxy")
                     .put("network", "tcp,udp")
-            ))
+                )
+            )
 
+        // Configuramos fakedns para atrapar las consultas de Android
         val dns = JSONObject()
-            .put("servers", JSONArray().put("1.1.1.1").put("8.8.8.8"))
+            .put("servers", JSONArray()
+                .put("fakedns")
+                .put("1.1.1.1")
+                .put("8.8.8.8")
+            )
+            .put("queryStrategy", "UseIP")
 
         return JSONObject()
             .put("log", JSONObject().put("loglevel", "warning"))
             .put("dns", dns)
+            .put("fakedns", JSONArray().put(JSONObject().put("ipPool", "198.18.0.0/15").put("poolSize", 65535)))
             .put("inbounds", JSONArray().put(inbound))
             .put("outbounds", JSONArray().put(outboundProxy).put(outboundDirect))
             .put("routing", routing)
