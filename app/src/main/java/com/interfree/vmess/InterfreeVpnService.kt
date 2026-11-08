@@ -19,7 +19,6 @@ import java.util.concurrent.Executors
 class InterfreeVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
-
     private val worker = Executors.newSingleThreadExecutor()
 
     @Volatile
@@ -98,7 +97,7 @@ class InterfreeVpnService : VpnService() {
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
             )
 
         } else {
@@ -114,7 +113,13 @@ class InterfreeVpnService : VpnService() {
 
         try {
 
-            UUID.fromString(uuid)
+            try {
+                UUID.fromString(uuid)
+            } catch (_: Exception) {
+                throw IllegalArgumentException(
+                    "El UUID guardado no es válido. Revísalo en MI CUENTA."
+                )
+            }
 
             stopXrayIfNeeded()
 
@@ -122,8 +127,6 @@ class InterfreeVpnService : VpnService() {
                 vpnInterface?.close()
             } catch (_: Exception) {
             }
-
-            vpnInterface = null
 
             val tun = Builder()
                 .setSession("INTERFREE VPN")
@@ -143,22 +146,16 @@ class InterfreeVpnService : VpnService() {
             val controller = object : DialerController {
 
                 override fun protectFd(fd: Long): Boolean {
-                    return this@InterfreeVpnService.protect(
-                        fd.toInt()
-                    )
+                    return this@InterfreeVpnService.protect(fd.toInt())
                 }
             }
 
             LibXray.touch()
 
             LibXray.registerDialerController(controller)
-
             LibXray.registerListenerController(controller)
 
-            LibXray.setDNS(
-                controller,
-                "1.1.1.1:53"
-            )
+            LibXray.setDNS(controller, "1.1.1.1:53")
 
             dnsConfigured = true
 
@@ -194,8 +191,6 @@ class InterfreeVpnService : VpnService() {
 
             xrayStarted = true
 
-            // El inicio de Xray no garantiza por sí solo
-            // que exista tráfico de Internet.
             broadcastState(
                 "CONECTANDO",
                 "Motor Xray iniciado. Comprobando conexión VMess..."
@@ -218,7 +213,6 @@ class InterfreeVpnService : VpnService() {
             )
 
             stopForegroundCompat()
-
             stopSelf()
         }
     }
@@ -323,7 +317,9 @@ class InterfreeVpnService : VpnService() {
                 LibXray.invoke(request.toString())
 
             } catch (_: Exception) {
+
             } finally {
+
                 xrayStarted = false
             }
         }
@@ -356,7 +352,6 @@ class InterfreeVpnService : VpnService() {
         )
 
         stopForegroundCompat()
-
         stopSelf()
     }
 
@@ -365,12 +360,12 @@ class InterfreeVpnService : VpnService() {
         message: String
     ) {
 
-        val intent = Intent(ACTION_STATUS)
-            .setPackage(packageName)
-            .putExtra(EXTRA_STATE, state)
-            .putExtra(EXTRA_MESSAGE, message)
-
-        sendBroadcast(intent)
+        sendBroadcast(
+            Intent(ACTION_STATUS)
+                .setPackage(packageName)
+                .putExtra(EXTRA_STATE, state)
+                .putExtra(EXTRA_MESSAGE, message)
+        )
     }
 
     private fun stopForegroundCompat() {
@@ -414,9 +409,7 @@ class InterfreeVpnService : VpnService() {
             "com.interfree.vmess.STATUS"
 
         const val EXTRA_UUID = "uuid"
-
         const val EXTRA_STATE = "state"
-
         const val EXTRA_MESSAGE = "message"
 
         private const val NOTIFICATION_ID = 4107
