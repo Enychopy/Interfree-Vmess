@@ -152,15 +152,13 @@ class InterfreeVpnService : VpnService() {
             
             for (i in 1..6) {
                 try {
-                    // Usamos la IP directa de un servidor de Google (8.8.8.8) para evadir la resolución DNS local
-                    val url = URL("http://8.8.8.8")
+                    // Usamos el endpoint de diagnóstico de red de Cloudflare (IP directa)
+                    val url = URL("http://1.1.1.1/cdn-cgi/trace")
                     val connection = url.openConnection() as HttpURLConnection
-                    connection.connectTimeout = 3000
-                    connection.readTimeout = 3000
-                    val code = connection.responseCode
+                    connection.connectTimeout = 3500
+                    connection.readTimeout = 3500
                     
-                    // Aceptamos cualquier respuesta HTTP (incluso errores o redirecciones) como prueba de conectividad exitosa
-                    if (code > 0) {
+                    if (connection.responseCode == 200) {
                         isConnected = true
                         break
                     }
