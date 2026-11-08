@@ -8,6 +8,7 @@ import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.system.Os
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
@@ -116,6 +117,9 @@ class InterfreeVpnService : VpnService() {
 
             vpnInterface = tun
 
+            // LA SOLUCIÓN DEFINITIVA: Inyectar el FD en el Sistema Operativo
+            Os.setenv("xray.tun.fd", tun.fd.toString(), true)
+
             val controller = object : DialerController {
                 override fun protectFd(fd: Long): Boolean {
                     return this@InterfreeVpnService.protect(fd.toInt())
@@ -128,7 +132,7 @@ class InterfreeVpnService : VpnService() {
             LibXray.setDNS(controller, "1.1.1.1:53")
             dnsConfigured = true
 
-            val xrayConfig = buildXrayConfig(uuid, tun.fd)
+            val xrayConfig = buildXrayConfig(uuid)
             
             val request = JSONObject()
                 .put("apiVersion", 3)
@@ -173,7 +177,7 @@ class InterfreeVpnService : VpnService() {
         }
     }
 
-    private fun buildXrayConfig(uuid: String, tunFd: Int): JSONObject {
+    private fun buildXrayConfig(uuid: String): JSONObject {
         val vmessUser = JSONObject()
             .put("id", uuid)
             .put("alterId", 0)
@@ -201,7 +205,6 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
-        // AQUÍ ESTÁ LA CORRECCIÓN CLAVE PARA EVITAR EL ERROR DE NETLINKRIB
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
@@ -241,7 +244,6 @@ class InterfreeVpnService : VpnService() {
         return JSONObject()
             .put("log", JSONObject().put("loglevel", "warning"))
             .put("dns", dns)
-            .put("env", JSONObject().put("xray.tun.fd", tunFd.toString()))
             .put("inbounds", JSONArray().put(inbound))
             .put("outbounds", JSONArray().put(outboundProxy).put(outboundDirect))
             .put("routing", routing)
@@ -270,6 +272,11 @@ class InterfreeVpnService : VpnService() {
 
     private fun stopTunnel() {
         stopXrayIfNeeded()
+        try {
+            // Limpiamos la variable de entorno al desconectar
+            Os.unsetenv("xray.tun.fd")
+        } catch (_: Exception) {}
+        
         try {
             vpnInterface?.close()
         } catch (_: Exception) {}
