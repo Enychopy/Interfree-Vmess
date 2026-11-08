@@ -8,7 +8,6 @@ import android.content.pm.ServiceInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.system.Os
 import libXray.DialerController
 import libXray.LibXray
 import org.json.JSONArray
@@ -117,9 +116,6 @@ class InterfreeVpnService : VpnService() {
 
             vpnInterface = tun
 
-            // Inyección del File Descriptor para que Xray lo tome
-            Os.setenv("xray.tun.fd", tun.fd.toString(), true)
-
             val controller = object : DialerController {
                 override fun protectFd(fd: Long): Boolean {
                     return this@InterfreeVpnService.protect(fd.toInt())
@@ -132,7 +128,8 @@ class InterfreeVpnService : VpnService() {
             LibXray.setDNS(controller, "1.1.1.1:53")
             dnsConfigured = true
 
-            val xrayConfig = buildXrayConfig(uuid)
+            // Le pasamos dinámicamente el FD del túnel recién creado
+            val xrayConfig = buildXrayConfig(uuid, tun.fd)
             
             val request = JSONObject()
                 .put("apiVersion", 3)
@@ -177,7 +174,7 @@ class InterfreeVpnService : VpnService() {
         }
     }
 
-    private fun buildXrayConfig(uuid: String): JSONObject {
+    private fun buildXrayConfig(uuid: String, tunFd: Int): JSONObject {
         val vmessUser = JSONObject()
             .put("id", uuid)
             .put("alterId", 0)
@@ -205,12 +202,13 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
-        // EL PARÁMETRO MÁGICO AÑADIDO AQUÍ: "stack": "gvisor"
+        // LA SOLUCIÓN DEFINITIVA: Inyectar fd:// como URI en el nombre de la interfaz
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
             .put("protocol", "tun")
             .put("settings", JSONObject()
+                .put("name", "fd://$tunFd") 
                 .put("mtu", 1500)
                 .put("autoRoute", false)
                 .put("strictRoute", false)
@@ -274,10 +272,6 @@ class InterfreeVpnService : VpnService() {
 
     private fun stopTunnel() {
         stopXrayIfNeeded()
-        try {
-            Os.unsetenv("xray.tun.fd")
-        } catch (_: Exception) {}
-        
         try {
             vpnInterface?.close()
         } catch (_: Exception) {}
