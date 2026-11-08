@@ -117,7 +117,7 @@ class InterfreeVpnService : VpnService() {
 
             vpnInterface = tun
 
-            // LA SOLUCIÓN DEFINITIVA: Inyectar el FD en el Sistema Operativo
+            // Inyección del File Descriptor para que Xray lo tome
             Os.setenv("xray.tun.fd", tun.fd.toString(), true)
 
             val controller = object : DialerController {
@@ -205,6 +205,7 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
+        // EL PARÁMETRO MÁGICO AÑADIDO AQUÍ: "stack": "gvisor"
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
@@ -213,6 +214,7 @@ class InterfreeVpnService : VpnService() {
                 .put("mtu", 1500)
                 .put("autoRoute", false)
                 .put("strictRoute", false)
+                .put("stack", "gvisor") 
             )
             .put("sniffing", JSONObject()
                 .put("enabled", true)
@@ -273,7 +275,6 @@ class InterfreeVpnService : VpnService() {
     private fun stopTunnel() {
         stopXrayIfNeeded()
         try {
-            // Limpiamos la variable de entorno al desconectar
             Os.unsetenv("xray.tun.fd")
         } catch (_: Exception) {}
         
