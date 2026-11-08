@@ -152,7 +152,8 @@ class InterfreeVpnService : VpnService() {
             
             for (i in 1..6) {
                 try {
-                    val url = URL("http://connectivitycheck.gstatic.com/generate_204")
+                    // LA SOLUCIÓN: Cambiamos de http a https
+                    val url = URL("https://connectivitycheck.gstatic.com/generate_204")
                     val connection = url.openConnection() as HttpURLConnection
                     connection.connectTimeout = 3000
                     connection.readTimeout = 3000
@@ -198,7 +199,6 @@ class InterfreeVpnService : VpnService() {
                 .put("users", JSONArray().put(vmessUser))
         ))
 
-        // SE ELIMINÓ allowInsecure PARA CUMPLIR CON XRAY CORE MODERNO
         val tlsSettings = JSONObject()
             .put("serverName", TLS_SNI)
             .put("fingerprint", "chrome")
