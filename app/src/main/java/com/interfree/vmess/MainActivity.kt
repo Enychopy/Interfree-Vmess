@@ -1,7 +1,13 @@
+
 package com.interfree.vmess
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,6 +33,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.UUID
 
 private val Navy = Color(0xFF080D1B)
 private val Panel = Color(0xFF121B31)
@@ -37,35 +44,129 @@ private val Muted = Color(0xFF9AA8C4)
 
 class MainActivity : ComponentActivity() {
 
-    private var permissionGranted by mutableStateOf(false)
+    private var vpnState by mutableStateOf("DESCONECTADO")
+    private var vpnMessage by mutableStateOf("")
+    private var pendingUuid = ""
 
     private val vpnPermission =
         registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
             if (result.resultCode == Activity.RESULT_OK) {
-                permissionGranted = true
+                startVpnService(pendingUuid)
+            } else {
+                vpnMessage = "Permiso VPN denegado"
             }
         }
+
+    private var receiverRegistered = false
+
+    private val vpnReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            vpnState = intent?.getStringExtra(
+                InterfreeVpnService.EXTRA_STATE
+            ) ?: "DESCONECTADO"
+
+            vpnMessage = intent?.getStringExtra(
+                InterfreeVpnService.EXTRA_MESSAGE
+            ).orEmpty()
+        }
+    }
+
+    private fun startVpnService(uuid: String) {
+        val serviceIntent = Intent(
+            this,
+            InterfreeVpnService::class.java
+        ).apply {
+            action = InterfreeVpnService.ACTION_START
+            putExtra(InterfreeVpnService.EXTRA_UUID, uuid)
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
+        vpnState = "CONECTANDO"
+        vpnMessage = "Iniciando conexión VMess..."
+    }
+
+    private fun stopVpnService() {
+        val serviceIntent = Intent(
+            this,
+            InterfreeVpnService::class.java
+        ).apply {
+            action = InterfreeVpnService.ACTION_STOP
+        }
+
+        startService(serviceIntent)
+        vpnState = "DESCONECTADO"
+        vpnMessage = "Desconectando VPN..."
+    }
+
+    override fun onStart() {
+        super.onStart()
+
+        val filter = IntentFilter(
+            InterfreeVpnService.ACTION_STATUS
+        )
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(
+                vpnReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(vpnReceiver, filter)
+        }
+
+        receiverRegistered = true
+    }
+
+    override fun onStop() {
+        if (receiverRegistered) {
+            unregisterReceiver(vpnReceiver)
+            receiverRegistered = false
+        }
+        super.onStop()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val prefs = getSharedPreferences("interfree", MODE_PRIVATE)
+        val prefs = getSharedPreferences(
+            "interfree",
+            MODE_PRIVATE
+        )
 
         setContent {
 
             var username by remember {
-                mutableStateOf(prefs.getString("username", "") ?: "")
+                mutableStateOf(
+                    prefs.getString("username", "") ?: ""
+                )
             }
 
             var uuid by remember {
-                mutableStateOf(prefs.getString("uuid", "") ?: "")
+                mutableStateOf(
+                    prefs.getString("uuid", "") ?: ""
+                )
             }
 
-            var showAccount by remember { mutableStateOf(false) }
-            var showUuid by remember { mutableStateOf(false) }
-            var showNotice by remember { mutableStateOf(false) }
+            var showAccount by remember {
+                mutableStateOf(false)
+            }
+
+            var showUuid by remember {
+                mutableStateOf(false)
+            }
+
+            var showNotice by remember {
+                mutableStateOf(false)
+            }
 
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -96,22 +197,31 @@ class MainActivity : ComponentActivity() {
                     Column(
                         Modifier
                             .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 20.dp, vertical = 22.dp),
-                        verticalArrangement = Arrangement.spacedBy(18.dp)
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
+                            .padding(
+                                horizontal = 20.dp,
+                                vertical = 22.dp
+                            ),
+                        verticalArrangement =
+                            Arrangement.spacedBy(18.dp)
                     ) {
 
                         // ENCABEZADO
 
                         Row(
                             Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment =
+                                Alignment.CenterVertically
                         ) {
 
                             Box(
                                 Modifier
                                     .size(46.dp)
-                                    .clip(RoundedCornerShape(15.dp))
+                                    .clip(
+                                        RoundedCornerShape(15.dp)
+                                    )
                                     .background(
                                         Brush.linearGradient(
                                             listOf(
@@ -120,23 +230,28 @@ class MainActivity : ComponentActivity() {
                                             )
                                         )
                                     ),
-                                contentAlignment = Alignment.Center
+                                contentAlignment =
+                                    Alignment.Center
                             ) {
                                 Text(
                                     "IF",
                                     fontSize = 21.sp,
-                                    fontWeight = FontWeight.Black,
+                                    fontWeight =
+                                        FontWeight.Black,
                                     color = Color.White
                                 )
                             }
 
                             Spacer(Modifier.width(12.dp))
 
-                            Column(Modifier.weight(1f)) {
+                            Column(
+                                Modifier.weight(1f)
+                            ) {
                                 Text(
                                     "INTERFREE VPN",
                                     fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold,
+                                    fontWeight =
+                                        FontWeight.ExtraBold,
                                     letterSpacing = 1.sp
                                 )
 
@@ -169,7 +284,8 @@ class MainActivity : ComponentActivity() {
 
                         Card(
                             colors = CardDefaults.cardColors(
-                                containerColor = Panel.copy(alpha = .96f)
+                                containerColor =
+                                    Panel.copy(alpha = .96f)
                             ),
                             shape = RoundedCornerShape(28.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -179,8 +295,10 @@ class MainActivity : ComponentActivity() {
                                 Modifier
                                     .fillMaxWidth()
                                     .padding(22.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(13.dp)
+                                horizontalAlignment =
+                                    Alignment.CenterHorizontally,
+                                verticalArrangement =
+                                    Arrangement.spacedBy(13.dp)
                             ) {
 
                                 Text(
@@ -188,7 +306,8 @@ class MainActivity : ComponentActivity() {
                                     color = Muted,
                                     fontSize = 11.sp,
                                     letterSpacing = 2.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight =
+                                        FontWeight.SemiBold
                                 )
 
                                 Box(
@@ -206,7 +325,8 @@ class MainActivity : ComponentActivity() {
                                             CircleShape
                                         )
                                         .padding(10.dp),
-                                    contentAlignment = Alignment.Center
+                                    contentAlignment =
+                                        Alignment.Center
                                 ) {
 
                                     Box(
@@ -222,29 +342,40 @@ class MainActivity : ComponentActivity() {
                                                     )
                                                 )
                                             ),
-                                        contentAlignment = Alignment.Center
+                                        contentAlignment =
+                                            Alignment.Center
                                     ) {
 
                                         Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally
+                                            horizontalAlignment =
+                                                Alignment.CenterHorizontally
                                         ) {
 
                                             Text(
                                                 "●",
-                                                color = Color(0xFFFFC66D),
+                                                color = if (
+                                                    vpnState == "CONECTADO"
+                                                ) Cyan else Color(0xFFFFC66D),
                                                 fontSize = 24.sp
                                             )
 
                                             Text(
-                                                "LISTO",
+                                                when (vpnState) {
+                                                    "CONECTADO" -> "ACTIVO"
+                                                    "CONECTANDO" -> "..."
+                                                    else -> "LISTO"
+                                                },
                                                 fontSize = 24.sp,
-                                                fontWeight = FontWeight.Black
+                                                fontWeight =
+                                                    FontWeight.Black
                                             )
 
                                             Text(
-                                                "DESCONECTADO",
+                                                vpnState,
                                                 fontSize = 9.sp,
-                                                color = Muted,
+                                                color = if (
+                                                    vpnState == "CONECTADO"
+                                                ) Cyan else Muted,
                                                 letterSpacing = 1.sp
                                             )
                                         }
@@ -252,44 +383,85 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 Text(
-                                    "Tu privacidad, a un toque de distancia",
+                                    vpnMessage.ifBlank {
+                                        "Tu privacidad, a un toque de distancia"
+                                    },
                                     color = Muted,
                                     fontSize = 12.sp
                                 )
 
                                 Button(
                                     onClick = {
-                                        val prepare =
-                                            VpnService.prepare(this@MainActivity)
-
-                                        if (prepare != null) {
-                                            vpnPermission.launch(prepare)
+                                        if (
+                                            vpnState == "CONECTADO" ||
+                                            vpnState == "CONECTANDO"
+                                        ) {
+                                            stopVpnService()
                                         } else {
-                                            permissionGranted = true
-                                            showNotice = true
+
+                                            val savedUuid =
+                                                prefs.getString(
+                                                    "uuid",
+                                                    ""
+                                                )?.trim().orEmpty()
+
+                                            try {
+                                                UUID.fromString(
+                                                    savedUuid
+                                                )
+
+                                                pendingUuid = savedUuid
+
+                                                val prepare =
+                                                    VpnService.prepare(
+                                                        this@MainActivity
+                                                    )
+
+                                                if (prepare != null) {
+                                                    vpnPermission.launch(
+                                                        prepare
+                                                    )
+                                                } else {
+                                                    startVpnService(
+                                                        savedUuid
+                                                    )
+                                                }
+
+                                            } catch (_: Exception) {
+                                                vpnMessage =
+                                                    "Ingresa y guarda un UUID válido en MI CUENTA."
+                                                showAccount = true
+                                            }
                                         }
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(54.dp),
-                                    shape = RoundedCornerShape(17.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Violet
-                                    )
+                                    shape =
+                                        RoundedCornerShape(17.dp),
+                                    colors =
+                                        ButtonDefaults.buttonColors(
+                                            containerColor =
+                                                if (
+                                                    vpnState == "CONECTADO"
+                                                ) Color(0xFFE05C69)
+                                                else Violet
+                                        )
                                 ) {
 
                                     Text(
-                                        if (permissionGranted)
-                                            "PERMISO VPN CONCEDIDO"
-                                        else
-                                            "ACTIVAR VPN",
+                                        if (
+                                            vpnState == "CONECTADO" ||
+                                            vpnState == "CONECTANDO"
+                                        ) "DESCONECTAR VPN"
+                                        else "ACTIVAR VPN",
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 1.sp
                                     )
                                 }
 
                                 Text(
-                                    "La conexión VMess estará disponible al integrar y validar el motor Xray.",
+                                    "Conexión VMess mediante Xray Core",
                                     color = Muted,
                                     fontSize = 10.sp
                                 )
@@ -299,7 +471,8 @@ class MainActivity : ComponentActivity() {
                         // ESTADÍSTICAS
 
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement =
+                                Arrangement.spacedBy(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
 
@@ -337,11 +510,13 @@ class MainActivity : ComponentActivity() {
 
                             Column(
                                 Modifier.padding(18.dp),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                verticalArrangement =
+                                    Arrangement.spacedBy(12.dp)
                             ) {
 
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment =
+                                        Alignment.CenterVertically
                                 ) {
 
                                     Text(
@@ -369,7 +544,9 @@ class MainActivity : ComponentActivity() {
                                 }
 
                                 HorizontalDivider(
-                                    color = Color.White.copy(alpha = .08f)
+                                    color = Color.White.copy(
+                                        alpha = .08f
+                                    )
                                 )
 
                                 InfoLine(
@@ -398,11 +575,13 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            border = androidx.compose.foundation.BorderStroke(
-                                1.dp,
-                                Violet.copy(alpha = .7f)
-                            )
+                            shape =
+                                RoundedCornerShape(16.dp),
+                            border =
+                                androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    Violet.copy(alpha = .7f)
+                                )
                         ) {
 
                             Text(
@@ -422,13 +601,15 @@ class MainActivity : ComponentActivity() {
                                 colors = CardDefaults.cardColors(
                                     containerColor = Panel
                                 ),
-                                shape = RoundedCornerShape(22.dp),
+                                shape =
+                                    RoundedCornerShape(22.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
 
                                 Column(
                                     Modifier.padding(18.dp),
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                    verticalArrangement =
+                                        Arrangement.spacedBy(12.dp)
                                 ) {
 
                                     Text(
@@ -440,32 +621,44 @@ class MainActivity : ComponentActivity() {
 
                                     OutlinedTextField(
                                         value = username,
-                                        onValueChange = { username = it },
+                                        onValueChange = {
+                                            username = it
+                                        },
                                         label = {
                                             Text("Nombre de usuario")
                                         },
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier =
+                                            Modifier.fillMaxWidth(),
                                         singleLine = true,
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Text
-                                        ),
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Text
+                                            ),
                                         colors = fieldColors()
                                     )
 
                                     OutlinedTextField(
                                         value = uuid,
-                                        onValueChange = { uuid = it },
-                                        label = { Text("UUID") },
-                                        modifier = Modifier.fillMaxWidth(),
+                                        onValueChange = {
+                                            uuid = it
+                                        },
+                                        label = {
+                                            Text("UUID")
+                                        },
+                                        modifier =
+                                            Modifier.fillMaxWidth(),
                                         singleLine = true,
                                         visualTransformation =
                                             if (showUuid)
                                                 VisualTransformation.None
                                             else
                                                 PasswordVisualTransformation(),
-                                        keyboardOptions = KeyboardOptions(
-                                            keyboardType = KeyboardType.Ascii
-                                        ),
+                                        keyboardOptions =
+                                            KeyboardOptions(
+                                                keyboardType =
+                                                    KeyboardType.Ascii
+                                            ),
                                         trailingIcon = {
                                             TextButton(
                                                 onClick = {
@@ -487,6 +680,7 @@ class MainActivity : ComponentActivity() {
 
                                     Button(
                                         onClick = {
+
                                             prefs.edit()
                                                 .putString(
                                                     "username",
@@ -499,11 +693,14 @@ class MainActivity : ComponentActivity() {
                                                 .apply()
 
                                             showAccount = false
+                                            vpnMessage =
+                                                "Datos de cuenta guardados."
                                         },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(50.dp),
-                                        shape = RoundedCornerShape(15.dp)
+                                        shape =
+                                            RoundedCornerShape(15.dp)
                                     ) {
 
                                         Text(
@@ -526,20 +723,15 @@ class MainActivity : ComponentActivity() {
             }
 
             if (showNotice) {
-
                 AlertDialog(
                     onDismissRequest = {
                         showNotice = false
                     },
                     title = {
-                        Text("Permiso VPN concedido")
+                        Text("INTERFREE VPN")
                     },
                     text = {
-                        Text(
-                            "Android autorizó el permiso VPN. " +
-                            "La conexión VMess todavía no se inicia: " +
-                            "falta integrar y validar Xray Core."
-                        )
+                        Text("Configuración de cuenta guardada.")
                     },
                     confirmButton = {
                         TextButton(
@@ -578,9 +770,14 @@ private fun MetricCard(
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(vertical = 15.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(
+                    vertical = 15.dp,
+                    horizontal = 8.dp
+                ),
+            horizontalAlignment =
+                Alignment.CenterHorizontally,
+            verticalArrangement =
+                Arrangement.spacedBy(4.dp)
         ) {
 
             Text(
@@ -621,8 +818,10 @@ private fun InfoLine(
 
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+        horizontalArrangement =
+            Arrangement.SpaceBetween,
+        verticalAlignment =
+            Alignment.CenterVertically
     ) {
 
         Text(
