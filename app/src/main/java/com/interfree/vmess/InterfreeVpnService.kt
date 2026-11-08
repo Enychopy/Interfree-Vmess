@@ -104,7 +104,6 @@ class InterfreeVpnService : VpnService() {
                 vpnInterface?.close()
             } catch (_: Exception) {}
 
-            // Túnel simplificado a IPv4 para evitar fugas y caídas de tráfico (blackholing)
             val tun = Builder()
                 .setSession("INTERFREE VPN")
                 .setMtu(1500)
@@ -130,6 +129,7 @@ class InterfreeVpnService : VpnService() {
             dnsConfigured = true
 
             val xrayConfig = buildXrayConfig(uuid, tun.fd)
+            
             val request = JSONObject()
                 .put("apiVersion", 3)
                 .put("method", "runXray")
@@ -145,7 +145,6 @@ class InterfreeVpnService : VpnService() {
             xrayStarted = true
             broadcastState("CONECTANDO", "Motor Xray iniciado. Verificando tráfico real...")
 
-            // PRUEBA DE TRÁFICO ESTRICTA: Verifica si hay internet a través del túnel
             var isConnected = false
             for (i in 1..4) {
                 try {
@@ -153,24 +152,23 @@ class InterfreeVpnService : VpnService() {
                     val connection = url.openConnection() as HttpURLConnection
                     connection.connectTimeout = 3000
                     connection.readTimeout = 3000
-                    // Si recibimos 204 o 200, el túnel está enrutando tráfico hacia internet correctamente
                     if (connection.responseCode == 204 || connection.responseCode == 200) {
                         isConnected = true
                         break
                     }
                 } catch (e: Exception) {
-                    Thread.sleep(1500) // Esperamos 1.5s antes de reintentar
+                    Thread.sleep(1500)
                 }
             }
 
             if (isConnected) {
                 broadcastState("CONECTADO", "Conexión VMess establecida. Tráfico fluyendo.")
             } else {
-                throw IllegalStateException("El túnel se abrió pero no hay acceso a Internet (Timeout). Revisa la conexión del servidor o tu UUID.")
+                throw IllegalStateException("Túnel abierto sin acceso a Internet. Revisa tu UUID o el estado del VPS.")
             }
 
         } catch (e: Exception) {
-            stopTunnel() // Forzamos apagado limpio
+            stopTunnel()
             broadcastState("DESCONECTADO", e.message ?: "Error al conectar")
         }
     }
@@ -203,11 +201,16 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
+        // AQUÍ ESTÁ LA CORRECCIÓN CLAVE PARA EVITAR EL ERROR DE NETLINKRIB
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
             .put("protocol", "tun")
-            .put("settings", JSONObject().put("mtu", 1500))
+            .put("settings", JSONObject()
+                .put("mtu", 1500)
+                .put("autoRoute", false)
+                .put("strictRoute", false)
+            )
             .put("sniffing", JSONObject()
                 .put("enabled", true)
                 .put("destOverride", JSONArray().put("http").put("tls"))
