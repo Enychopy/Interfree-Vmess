@@ -21,6 +21,9 @@ class InterfreeVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private val worker = Executors.newSingleThreadExecutor()
+    
+    // CORRECCIÓN CLAVE 1: Variable global para evitar que Android borre el controlador de memoria
+    private var activeDialerController: DialerController? = null
 
     @Volatile
     private var xrayStarted = false
@@ -116,19 +119,18 @@ class InterfreeVpnService : VpnService() {
 
             vpnInterface = tun
 
-            val controller = object : DialerController {
+            activeDialerController = object : DialerController {
                 override fun protectFd(fd: Long): Boolean {
                     return this@InterfreeVpnService.protect(fd.toInt())
                 }
             }
 
             LibXray.touch()
-            LibXray.registerDialerController(controller)
-            LibXray.registerListenerController(controller)
-            LibXray.setDNS(controller, "1.1.1.1:53")
+            LibXray.registerDialerController(activeDialerController)
+            LibXray.registerListenerController(activeDialerController)
+            LibXray.setDNS(activeDialerController, "1.1.1.1:53")
             dnsConfigured = true
 
-            // Le pasamos dinámicamente el FD del túnel recién creado
             val xrayConfig = buildXrayConfig(uuid, tun.fd)
             
             val request = JSONObject()
@@ -147,30 +149,41 @@ class InterfreeVpnService : VpnService() {
             broadcastState("CONECTANDO", "Motor Xray iniciado. Verificando tráfico real...")
 
             var isConnected = false
-            for (i in 1..4) {
+            var lastError = "El servidor no respondió a tiempo."
+            
+            // CORRECCIÓN CLAVE 3: Diagnóstico detallado con 6 intentos (12 segundos max)
+            for (i in 1..6) {
                 try {
                     val url = URL("http://connectivitycheck.gstatic.com/generate_204")
                     val connection = url.openConnection() as HttpURLConnection
                     connection.connectTimeout = 3000
                     connection.readTimeout = 3000
-                    if (connection.responseCode == 204 || connection.responseCode == 200) {
+                    val code = connection.responseCode
+                    if (code == 204 || code == 200) {
                         isConnected = true
                         break
                     }
+                } catch (e: java.net.UnknownHostException) {
+                    lastError = "Fallo DNS: El VPS no está resolviendo dominios."
+                    Thread.sleep(2000)
+                } catch (e: java.net.SocketTimeoutException) {
+                    lastError = "Timeout: El VPS no responde o tu UUID fue rechazado."
+                    Thread.sleep(2000)
                 } catch (e: Exception) {
-                    Thread.sleep(1500)
+                    lastError = "Error de red: ${e.message}"
+                    Thread.sleep(2000)
                 }
             }
 
             if (isConnected) {
                 broadcastState("CONECTADO", "Conexión VMess establecida. Tráfico fluyendo.")
             } else {
-                throw IllegalStateException("Túnel abierto sin acceso a Internet. Revisa tu UUID o el estado del VPS.")
+                throw IllegalStateException(lastError)
             }
 
         } catch (e: Exception) {
             stopTunnel()
-            broadcastState("DESCONECTADO", e.message ?: "Error al conectar")
+            broadcastState("DESCONECTADO", e.message ?: "Error desconocido")
         }
     }
 
@@ -187,8 +200,10 @@ class InterfreeVpnService : VpnService() {
                 .put("users", JSONArray().put(vmessUser))
         ))
 
+        // CORRECCIÓN CLAVE 2: allowInsecure = true para forzar el paso del TLS del panel 3X-UI
         val tlsSettings = JSONObject()
             .put("serverName", TLS_SNI)
+            .put("allowInsecure", true)
             .put("fingerprint", "chrome")
             .put("alpn", JSONArray().put("h2").put("http/1.1"))
 
@@ -202,7 +217,6 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
-        // LA SOLUCIÓN DEFINITIVA: Inyectar fd:// como URI en el nombre de la interfaz
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
@@ -272,11 +286,13 @@ class InterfreeVpnService : VpnService() {
 
     private fun stopTunnel() {
         stopXrayIfNeeded()
+        
         try {
             vpnInterface?.close()
         } catch (_: Exception) {}
         
         vpnInterface = null
+        activeDialerController = null
         stopForegroundCompat()
         stopSelf()
     }
