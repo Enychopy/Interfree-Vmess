@@ -111,7 +111,6 @@ class InterfreeVpnService : VpnService() {
                 .setMtu(1500)
                 .addAddress("172.19.0.2", 24)
                 .addRoute("0.0.0.0", 0)
-                // Usamos un DNS virtual interno de Xray (fakedns) para capturar las peticiones
                 .addDnsServer("1.1.1.1") 
                 .addDnsServer("8.8.8.8")
                 .establish()
@@ -153,18 +152,18 @@ class InterfreeVpnService : VpnService() {
             
             for (i in 1..6) {
                 try {
-                    val url = URL("https://connectivitycheck.gstatic.com/generate_204")
+                    // Usamos la IP directa de un servidor de Google (8.8.8.8) para evadir la resolución DNS local
+                    val url = URL("http://8.8.8.8")
                     val connection = url.openConnection() as HttpURLConnection
                     connection.connectTimeout = 3000
                     connection.readTimeout = 3000
                     val code = connection.responseCode
-                    if (code == 204 || code == 200) {
+                    
+                    // Aceptamos cualquier respuesta HTTP (incluso errores o redirecciones) como prueba de conectividad exitosa
+                    if (code > 0) {
                         isConnected = true
                         break
                     }
-                } catch (e: java.net.UnknownHostException) {
-                    lastError = "Fallo DNS: El VPS no está resolviendo dominios."
-                    Thread.sleep(2000)
                 } catch (e: java.net.SocketTimeoutException) {
                     lastError = "Timeout: El VPS no responde o tu UUID fue rechazado."
                     Thread.sleep(2000)
@@ -214,7 +213,6 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
-        // Habilitamos la intercepción DNS en la interfaz TUN
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
@@ -242,7 +240,6 @@ class InterfreeVpnService : VpnService() {
             .put("tag", "direct")
             .put("protocol", "freedom")
 
-        // Configuramos Xray para resolver DNS y creamos una regla para enrutar el tráfico DNS al proxy
         val routing = JSONObject()
             .put("domainStrategy", "AsIs")
             .put("rules", JSONArray()
@@ -259,7 +256,6 @@ class InterfreeVpnService : VpnService() {
                 )
             )
 
-        // Configuramos fakedns para atrapar las consultas de Android
         val dns = JSONObject()
             .put("servers", JSONArray()
                 .put("fakedns")
