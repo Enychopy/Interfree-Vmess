@@ -22,7 +22,6 @@ class InterfreeVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private val worker = Executors.newSingleThreadExecutor()
     
-    // CORRECCIÓN CLAVE 1: Variable global para evitar que Android borre el controlador de memoria
     private var activeDialerController: DialerController? = null
 
     @Volatile
@@ -151,7 +150,6 @@ class InterfreeVpnService : VpnService() {
             var isConnected = false
             var lastError = "El servidor no respondió a tiempo."
             
-            // CORRECCIÓN CLAVE 3: Diagnóstico detallado con 6 intentos (12 segundos max)
             for (i in 1..6) {
                 try {
                     val url = URL("http://connectivitycheck.gstatic.com/generate_204")
@@ -200,10 +198,9 @@ class InterfreeVpnService : VpnService() {
                 .put("users", JSONArray().put(vmessUser))
         ))
 
-        // CORRECCIÓN CLAVE 2: allowInsecure = true para forzar el paso del TLS del panel 3X-UI
+        // SE ELIMINÓ allowInsecure PARA CUMPLIR CON XRAY CORE MODERNO
         val tlsSettings = JSONObject()
             .put("serverName", TLS_SNI)
-            .put("allowInsecure", true)
             .put("fingerprint", "chrome")
             .put("alpn", JSONArray().put("h2").put("http/1.1"))
 
