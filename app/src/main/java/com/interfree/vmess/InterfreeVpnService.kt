@@ -15,7 +15,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.UUID
 import java.util.concurrent.Executors
 
 class InterfreeVpnService : VpnService() {
@@ -37,10 +36,13 @@ class InterfreeVpnService : VpnService() {
     ): Int {
         when (intent?.action) {
             ACTION_START -> {
-                val uuid = intent.getStringExtra(EXTRA_UUID).orEmpty()
+                val profileLink =
+                    intent.getStringExtra(EXTRA_PROFILE).orEmpty()
+
                 startInForeground()
+
                 worker.execute {
-                    startTunnel(uuid)
+                    startTunnel(profileLink)
                 }
             }
 
@@ -50,6 +52,7 @@ class InterfreeVpnService : VpnService() {
                 }
             }
         }
+
         return START_NOT_STICKY
     }
 
@@ -62,6 +65,7 @@ class InterfreeVpnService : VpnService() {
                 "INTERFREE VPN",
                 NotificationManager.IMPORTANCE_LOW
             )
+
             getSystemService(NotificationManager::class.java)
                 .createNotificationChannel(channel)
         }
@@ -95,13 +99,21 @@ class InterfreeVpnService : VpnService() {
         }
     }
 
-    private fun startTunnel(uuid: String) {
+    private fun startTunnel(profileLink: String) {
         try {
-            try {
-                UUID.fromString(uuid)
-            } catch (_: Exception) {
+            broadcastState(
+                "CONECTANDO",
+                "Validando perfil VMess..."
+            )
+
+            val profile = VmessProfile.parse(profileLink)
+
+            if (profile.network != "ws" &&
+                profile.network != "tcp"
+            ) {
                 throw IllegalArgumentException(
-                    "El UUID guardado no es válido. Revísalo en MI CUENTA."
+                    "Este servicio admite actualmente VMess WS y TCP. " +
+                    "El transporte recibido es: ${profile.network}"
                 )
             }
 
@@ -121,31 +133,47 @@ class InterfreeVpnService : VpnService() {
                 .addDnsServer("8.8.8.8")
                 .establish()
                 ?: throw IllegalStateException(
-                    "Android no permitió crear la interfaz VPN"
+                    "Android no permitió crear la interfaz VPN."
                 )
 
             vpnInterface = tun
 
             activeDialerController = object : DialerController {
                 override fun protectFd(fd: Long): Boolean {
-                    return this@InterfreeVpnService.protect(fd.toInt())
+                    return this@InterfreeVpnService.protect(
+                        fd.toInt()
+                    )
                 }
             }
 
             LibXray.touch()
-            LibXray.registerDialerController(activeDialerController)
-            LibXray.registerListenerController(activeDialerController)
-            LibXray.setDNS(activeDialerController, "1.1.1.1:53")
+            LibXray.registerDialerController(
+                activeDialerController
+            )
+            LibXray.registerListenerController(
+                activeDialerController
+            )
+            LibXray.setDNS(
+                activeDialerController,
+                "1.1.1.1:53"
+            )
+
             dnsConfigured = true
 
-            val xrayConfig = buildXrayConfig(uuid, tun.fd)
+            val xrayConfig = buildXrayConfig(
+                profile,
+                tun.fd
+            )
 
             val request = JSONObject()
                 .put("apiVersion", 3)
                 .put("method", "runXray")
                 .put(
                     "payload",
-                    JSONObject().put("xrayJson", xrayConfig.toString())
+                    JSONObject().put(
+                        "xrayJson",
+                        xrayConfig.toString()
+                    )
                 )
 
             val response = JSONObject(
@@ -156,7 +184,7 @@ class InterfreeVpnService : VpnService() {
                 throw IllegalStateException(
                     response.optString(
                         "error",
-                        "Xray falló al arrancar"
+                        "Xray no pudo iniciar."
                     )
                 )
             }
@@ -165,75 +193,50 @@ class InterfreeVpnService : VpnService() {
 
             broadcastState(
                 "CONECTANDO",
-                "Motor Xray iniciado. Verificando tráfico real..."
+                "Xray inició. Comprobando tráfico por el túnel..."
             )
 
-            var isConnected = false
-            var lastError = "El servidor no respondió a tiempo."
-
-            for (i in 1..6) {
-                try {
-                    val url = URL("http://1.1.1.1/cdn-cgi/trace")
-                    val connection =
-                        url.openConnection() as HttpURLConnection
-
-                    connection.connectTimeout = 3500
-                    connection.readTimeout = 3500
-
-                    if (connection.responseCode == 200) {
-                        isConnected = true
-                        connection.disconnect()
-                        break
-                    }
-
-                    connection.disconnect()
-
-                } catch (e: java.net.SocketTimeoutException) {
-                    lastError =
-                        "Timeout: No se recibió respuesta del servidor."
-                    Thread.sleep(2000)
-
-                } catch (e: Exception) {
-                    lastError = "Error de red: ${e.message}"
-                    Thread.sleep(2000)
-                }
-            }
-
-            if (isConnected) {
+            if (verifyTunnelTraffic()) {
                 broadcastState(
                     "CONECTADO",
-                    "Conexión VMess establecida. Tráfico fluyendo."
+                    "El servidor respondió a través de la VPN."
                 )
             } else {
-                throw IllegalStateException(lastError)
+                throw IllegalStateException(
+                    "Xray inició, pero no se pudo verificar " +
+                    "la navegación a través del túnel."
+                )
             }
 
         } catch (e: Exception) {
+            val error = e.message ?: "Error desconocido"
+
             stopTunnel()
+
             broadcastState(
                 "DESCONECTADO",
-                e.message ?: "Error desconocido"
+                error
             )
         }
     }
 
     private fun buildXrayConfig(
-        uuid: String,
+        profile: VmessProfile,
         tunFd: Int
     ): JSONObject {
 
         val vmessUser = JSONObject()
-            .put("id", uuid)
-            .put("alterId", 0)
-            .put("security", "auto")
+            .put("id", profile.uuid)
+            .put("alterId", profile.alterId)
+            .put("security", profile.security)
 
         val vmessSettings = JSONObject()
             .put(
                 "vnext",
                 JSONArray().put(
                     JSONObject()
-                        .put("address", SERVER_ADDRESS)
-                        .put("port", 443)
+                        .put("address", profile.address)
+                        .put("port", profile.port)
                         .put(
                             "users",
                             JSONArray().put(vmessUser)
@@ -241,30 +244,59 @@ class InterfreeVpnService : VpnService() {
                 )
             )
 
-        // TLS: SNI Y FINGERPRINT
-        val tlsSettings = JSONObject()
-            .put("serverName", TLS_SNI)
-            .put("fingerprint", "chrome")
-            .put(
-                "alpn",
-                JSONArray().put("h2").put("http/1.1")
-            )
-
-        // WEBSOCKET
-        val wsSettings = JSONObject()
-            .put("path", "/")
-            .put(
-                "headers",
-                JSONObject().put("Host", WS_HOST)
-            )
-
         val streamSettings = JSONObject()
-            .put("network", "ws")
-            .put("security", "tls")
-            .put("tlsSettings", tlsSettings)
-            .put("wsSettings", wsSettings)
+            .put("network", profile.network)
+            .put(
+                "security",
+                if (profile.tls) "tls" else "none"
+            )
 
-        // TUN: EL FD SE ENTREGA MEDIANTE ENV
+        if (profile.tls) {
+            val tlsSettings = JSONObject()
+                .put(
+                    "serverName",
+                    profile.sni.ifBlank {
+                        profile.address
+                    }
+                )
+                .put(
+                    "fingerprint",
+                    profile.fingerprint
+                )
+
+            if (profile.alpn.isNotEmpty()) {
+                tlsSettings.put(
+                    "alpn",
+                    JSONArray(profile.alpn)
+                )
+            }
+
+            streamSettings.put(
+                "tlsSettings",
+                tlsSettings
+            )
+        }
+
+        if (profile.network == "ws") {
+            val wsSettings = JSONObject()
+                .put("path", profile.path)
+
+            if (profile.host.isNotBlank()) {
+                wsSettings.put(
+                    "headers",
+                    JSONObject().put(
+                        "Host",
+                        profile.host
+                    )
+                )
+            }
+
+            streamSettings.put(
+                "wsSettings",
+                wsSettings
+            )
+        }
+
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
@@ -276,19 +308,16 @@ class InterfreeVpnService : VpnService() {
                     .put("mtu", 1500)
             )
 
-        // SALIDA VMESS
         val outboundProxy = JSONObject()
             .put("tag", "proxy")
             .put("protocol", "vmess")
             .put("settings", vmessSettings)
             .put("streamSettings", streamSettings)
 
-        // SALIDA DIRECTA
         val outboundDirect = JSONObject()
             .put("tag", "direct")
             .put("protocol", "freedom")
 
-        // ENRUTAMIENTO
         val routing = JSONObject()
             .put("domainStrategy", "AsIs")
             .put(
@@ -309,7 +338,6 @@ class InterfreeVpnService : VpnService() {
                     )
             )
 
-        // DNS
         val dns = JSONObject()
             .put(
                 "servers",
@@ -320,7 +348,6 @@ class InterfreeVpnService : VpnService() {
             )
             .put("queryStrategy", "UseIP")
 
-        // DESCRIPTOR TUN PARA LIBXRAY ACTUAL
         val env = JSONObject()
             .put("xray.tun.fd", tunFd.toString())
 
@@ -328,7 +355,10 @@ class InterfreeVpnService : VpnService() {
             .put("env", env)
             .put(
                 "log",
-                JSONObject().put("loglevel", "warning")
+                JSONObject().put(
+                    "loglevel",
+                    "warning"
+                )
             )
             .put("dns", dns)
             .put(
@@ -339,7 +369,10 @@ class InterfreeVpnService : VpnService() {
                         .put("poolSize", 65535)
                 )
             )
-            .put("inbounds", JSONArray().put(inbound))
+            .put(
+                "inbounds",
+                JSONArray().put(inbound)
+            )
             .put(
                 "outbounds",
                 JSONArray()
@@ -347,6 +380,49 @@ class InterfreeVpnService : VpnService() {
                     .put(outboundDirect)
             )
             .put("routing", routing)
+    }
+
+    private fun verifyTunnelTraffic(): Boolean {
+        for (attempt in 1..3) {
+            var connection: HttpURLConnection? = null
+
+            try {
+                val url = URL(
+                    "https://www.cloudflare.com/cdn-cgi/trace"
+                )
+
+                connection =
+                    url.openConnection() as HttpURLConnection
+
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                connection.useCaches = false
+
+                val code = connection.responseCode
+
+                if (code == 200) {
+                    val body = connection.inputStream
+                        .bufferedReader()
+                        .use { it.readText() }
+
+                    if (body.contains("ip=")) {
+                        return true
+                    }
+                }
+
+            } catch (_: Exception) {
+                // Se intenta nuevamente.
+            } finally {
+                connection?.disconnect()
+            }
+
+            if (attempt < 3) {
+                Thread.sleep(2000)
+            }
+        }
+
+        return false
     }
 
     private fun stopXrayIfNeeded() {
@@ -427,19 +503,10 @@ class InterfreeVpnService : VpnService() {
         const val ACTION_STATUS =
             "com.interfree.vmess.STATUS"
 
-        const val EXTRA_UUID = "uuid"
+        const val EXTRA_PROFILE = "vmess_profile"
         const val EXTRA_STATE = "state"
         const val EXTRA_MESSAGE = "message"
 
         private const val NOTIFICATION_ID = 4107
-
-        private const val SERVER_ADDRESS =
-            "103.232.95.108"
-
-        private const val TLS_SNI =
-            "www.googletagmanager.com"
-
-        private const val WS_HOST =
-            "interfree-vpn.duckdns.org"
     }
 }
