@@ -1,3 +1,4 @@
+
 package com.interfree.vmess
 
 import android.app.Notification
@@ -239,17 +240,17 @@ class InterfreeVpnService : VpnService() {
                 )
             )
 
-        // CONFIGURACIÓN TLS CORREGIDA SEGÚN NPV TUNNEL
+        // TLS: SNI Y FINGERPRINT
+        // allowInsecure se eliminó porque esta versión de Xray no lo admite.
         val tlsSettings = JSONObject()
             .put("serverName", TLS_SNI)
-            .put("allowInsecure", true)
             .put("fingerprint", "chrome")
             .put(
                 "alpn",
                 JSONArray().put("h2").put("http/1.1")
             )
 
-        // TRANSPORTE WEBSOCKET
+        // WEBSOCKET
         val wsSettings = JSONObject()
             .put("path", "/")
             .put(
