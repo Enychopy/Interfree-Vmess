@@ -153,11 +153,12 @@ class InterfreeVpnService : VpnService() {
             )
 
             if (!response.optBoolean("success", false)) {
-                val error = response.optString(
-                    "error",
-                    "Xray falló al arrancar"
+                throw IllegalStateException(
+                    response.optString(
+                        "error",
+                        "Xray falló al arrancar"
+                    )
                 )
-                throw IllegalStateException(error)
             }
 
             xrayStarted = true
@@ -189,7 +190,7 @@ class InterfreeVpnService : VpnService() {
 
                 } catch (e: java.net.SocketTimeoutException) {
                     lastError =
-                        "Timeout: El VPS no responde o tu UUID fue rechazado."
+                        "Timeout: No se recibió respuesta del servidor."
                     Thread.sleep(2000)
 
                 } catch (e: Exception) {
@@ -241,7 +242,6 @@ class InterfreeVpnService : VpnService() {
             )
 
         // TLS: SNI Y FINGERPRINT
-        // allowInsecure se eliminó porque esta versión de Xray no lo admite.
         val tlsSettings = JSONObject()
             .put("serverName", TLS_SNI)
             .put("fingerprint", "chrome")
@@ -264,7 +264,7 @@ class InterfreeVpnService : VpnService() {
             .put("tlsSettings", tlsSettings)
             .put("wsSettings", wsSettings)
 
-        // INTERFAZ TUN
+        // TUN: EL FD SE ENTREGA MEDIANTE ENV
         val inbound = JSONObject()
             .put("tag", "tun-in")
             .put("port", 0)
@@ -272,24 +272,8 @@ class InterfreeVpnService : VpnService() {
             .put(
                 "settings",
                 JSONObject()
-                    .put("name", "fd://$tunFd")
+                    .put("name", "tun0")
                     .put("mtu", 1500)
-                    .put("autoRoute", false)
-                    .put("strictRoute", false)
-                    .put("stack", "gvisor")
-            )
-            .put(
-                "sniffing",
-                JSONObject()
-                    .put("enabled", true)
-                    .put(
-                        "destOverride",
-                        JSONArray()
-                            .put("http")
-                            .put("tls")
-                            .put("fakedns")
-                    )
-                    .put("routeOnly", true)
             )
 
         // SALIDA VMESS
@@ -336,7 +320,12 @@ class InterfreeVpnService : VpnService() {
             )
             .put("queryStrategy", "UseIP")
 
+        // DESCRIPTOR TUN PARA LIBXRAY ACTUAL
+        val env = JSONObject()
+            .put("xray.tun.fd", tunFd.toString())
+
         return JSONObject()
+            .put("env", env)
             .put(
                 "log",
                 JSONObject().put("loglevel", "warning")
