@@ -147,12 +147,15 @@ class InterfreeVpnService : VpnService() {
             }
 
             LibXray.touch()
+
             LibXray.registerDialerController(
                 activeDialerController
             )
+
             LibXray.registerListenerController(
                 activeDialerController
             )
+
             LibXray.setDNS(
                 activeDialerController,
                 "1.1.1.1:53"
@@ -199,12 +202,15 @@ class InterfreeVpnService : VpnService() {
             if (verifyTunnelTraffic()) {
                 broadcastState(
                     "CONECTADO",
-                    "El servidor respondió a través de la VPN."
+                    "Prueba automática completada. Verifica también tu IP pública."
                 )
             } else {
-                throw IllegalStateException(
-                    "Xray inició, pero no se pudo verificar " +
-                    "la navegación a través del túnel."
+                // No detener Xray por una prueba HTTP no concluyente.
+                // El usuario podrá comprobar la navegación manualmente.
+                broadcastState(
+                    "CONECTANDO",
+                    "Xray sigue activo, pero la prueba automática no fue concluyente. " +
+                    "Prueba abrir una página en Chrome y consulta tu IP pública."
                 )
             }
 
